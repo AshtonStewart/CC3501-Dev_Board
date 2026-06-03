@@ -8,6 +8,7 @@
 
 #define LED_PIN 14
 
+// Edit this code, add leds.cpp and leds.h then link that to cmakelists.txt to build a good foundation.
 int main()
 {
     stdio_init_all();
@@ -37,3 +38,6 @@ int main()
 
     return 0;
 }
+
+
+    //Added this little note here

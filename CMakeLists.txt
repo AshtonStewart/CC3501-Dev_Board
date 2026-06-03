@@ -51,6 +51,8 @@ if(CrossCompiling)
         PUBLIC
         src/main.cpp
         src/drivers/logging/logging.cpp
+        src/drivers/leds.h
+        src/drivers/leds.cpp
     )
     target_include_directories(labs
         PUBLIC 
