@@ -3,238 +3,328 @@
 #include "hardware/gpio.h"
 #include "hardware/pio.h"
 #include "hardware/i2c.h"
-#include "pico/stdlib.h"
 #include "hardware/adc.h"
+#include "drivers/leds.h"
+#include "drivers/lis3dh.h"
+#include "drivers/microphone.h"
 
-#include "WS2812.pio.h" // This header file gets produced during compilation from the WS2812.pio file
+#include "WS2812.pio.h"
 #include "drivers/logging/logging.h"
 #include <string>
+#include <string.h>
+#include <cstring>
 
-#define LED_PIN 14
+#include <math.h>
+#include "arm_math.h"
+
+#define LED_PIN  14
 #define NUM_LEDS 12
-//Addressable RGB strip, each led in the row is based off a position (so first led is 0, second is 1, third is 2, etc)
 
-// Edit this code, add leds.cpp and leds.h then link that to cmakelists.txt to build a good foundation.
+#define grav_const      9.81
+#define baud_rate_in_z  400000
+#define ACCEL_SCL_SCLK  2
+#define Accel_SDA_MOSI  3
 
-//lab 2:
+// Lab 2 
+
+// Helper to read a line over USB serial character by character
+static int read_line(char *buf, int max_len) {
+    int i = 0;
+    while (i < max_len - 1) {
+        int c = getchar();
+        if (c == EOF) continue;
+        if (c == '\n' || c == '\r') {
+            if (i > 0) break;  // only stop if we have something
+            continue;           // skip leading newlines
+        }
+        buf[i++] = (char)c;
+    }
+    buf[i] = '\0';
+    return i;
+}
 
 
+int lab2() {
+    char input[32];
 
-//Lab 3:
-    #define grav_const 9.81
-    #define baud_rate_in_z 400000
-    //stationary object so try to have g of 1 and resolution of2?
+    // Quick startup animation to confirm LEDs are working
+    // Cycles each LED through red, green, blue before entering the menu
+    printf("Hello world\n");
+    for (int i = 0; i < NUM_LEDS; i++) {
+        leds_set(i, 255, 0, 0); // red
+        leds_show();
+        sleep_ms(5);
+        leds_set(i, 0, 255, 0); // green
+        leds_show();
+        sleep_ms(5);
+        leds_set(i, 0, 0, 255); // blue
+        leds_show();
+        sleep_ms(5);
+    }
 
-    //configure to use I2C or PSI
+    // Main interactive loop — keeps running until the board is reset. Note to self: Make it end this function and loop if bootsell is pressed.
+    while (true) {
 
-    #define ACCEL_SCL_SCLK 2 //GPIO4
-    #define Accel_SDA_MOSI 3 //GPIO5
+        // Print the menu and wait for user input
+        printf("\nOptions: [see] [set] [commit]\n> ");
+        fflush(stdout);
+        read_line(input, sizeof(input));
+        printf("%s\n", input); // echo back what was received
+        fflush(stdout);
 
-    #define ACCEL_ADDR  0x19
-    #define CTRL_REG1   0x20
-    #define OUT_X_L     0x28
-    #define OUT_X_H     0x29
-    #define OUT_Y_L     0x2A
-    #define OUT_Y_H     0x2B
-    #define OUT_Z_L     0x2C
-    #define OUT_Z_H     0x2D
+        // Prints the current colours of the rp2040 leds and the light colours that are to be committed next time commit is used
+        if (strcmp(input, "see") == 0) {
+            for (int i = 0; i < NUM_LEDS; i++) {
+                uint8_t cr, cg, cb, pr, pg, pb;
+                leds_get(i, &cr, &cg, &cb);           // what the LED shows now
+                leds_get_pending(i, &pr, &pg, &pb);   // what it will show after commit
+                printf("%2d. now: R:%3d G:%3d B:%3d   will be: R:%3d G:%3d B:%3d\n",
+                       i + 1, cr, cg, cb, pr, pg, pb);
+                fflush(stdout);
+            }
 
-    #define SDA_PIN     16    // GPIO16 = Accel_SDA_MOSI — data line, bidirectional
-    #define SCL_PIN     17    // GPIO17 = Accel_SCL_SCLK — clock line, driven by RP2040
-    //#define slave_address 001100xb
 
+            // Asks the user which LED (or all) to change, then reads new R/G/B values without committing changes to the pico. 
+        
+        } else if (strcmp(input, "set") == 0) {
+            char num_buf[16];
+
+            printf("LED to change? (1-%d or 'all'): ", NUM_LEDS);
+            fflush(stdout);
+            read_line(num_buf, sizeof(num_buf));
+
+            // ALL command: set every LED to the same colour ──
+            if (strcmp(num_buf, "all") == 0) {
+
+                // Use LED 0's current values as the reference for the prompt
+                uint8_t cr, cg, cb;
+                leds_get(0, &cr, &cg, &cb);
+
+                printf("New R value for all LEDs? (current: %d): ", cr);
+                fflush(stdout);
+                read_line(num_buf, sizeof(num_buf));
+                int r = atoi(num_buf);
+                printf("%d\n", r);
+                fflush(stdout);
+
+                printf("New G value for all LEDs? (current: %d): ", cg);
+                fflush(stdout);
+                read_line(num_buf, sizeof(num_buf));
+                int g = atoi(num_buf);
+                printf("%d\n", g);
+                fflush(stdout);
+
+                printf("New B value for all LEDs? (current: %d): ", cb);
+                fflush(stdout);
+                read_line(num_buf, sizeof(num_buf));
+                int b = atoi(num_buf);
+                printf("%d\n", b);
+                fflush(stdout);
+
+                // Stage the same colour on every LED
+                for (int i = 0; i < NUM_LEDS; i++)
+                    leds_set(i, (uint8_t)r, (uint8_t)g, (uint8_t)b);
+
+                printf("All LEDs staged. Use 'commit' to apply.\n");
+                fflush(stdout);
+
+            // ── Single LED branch: set just one LED ──
+            } else {
+                // Convert from 1-based user input to 0-based array index
+                int idx = atoi(num_buf) - 1;
+                printf("%d\n", idx + 1);
+                fflush(stdout);
+
+                // Validate the index is within range
+                if (idx < 0 || idx >= NUM_LEDS) {
+                    printf("Invalid LED number.\n");
+                    fflush(stdout);
+                    continue;
+                }
+
+                // Read the current committed colour to show as a hint
+                uint8_t cr, cg, cb;
+                leds_get(idx, &cr, &cg, &cb);
+
+                printf("New R value? (current: %d): ", cr);
+                fflush(stdout);
+                read_line(num_buf, sizeof(num_buf));
+                int r = atoi(num_buf);
+                printf("%d\n", r);
+                fflush(stdout);
+
+                printf("New G value? (current: %d): ", cg);
+                fflush(stdout);
+                read_line(num_buf, sizeof(num_buf));
+                int g = atoi(num_buf);
+                printf("%d\n", g);
+                fflush(stdout);
+
+                printf("New B value? (current: %d): ", cb);
+                fflush(stdout);
+                read_line(num_buf, sizeof(num_buf));
+                int b = atoi(num_buf);
+                printf("%d\n", b);
+                fflush(stdout);
+
+                // Stage the new colour for this LED
+                leds_set(idx, (uint8_t)r, (uint8_t)g, (uint8_t)b);
+                printf("Staged. Use 'commit' to apply.\n");
+                fflush(stdout);
+            }
+
+        // Sends all staged values to the hardware, making them visible on the LEDs.
+        // Also copies pending values into the current values internally.
+        } else if (strcmp(input, "commit") == 0) {
+            leds_show();
+            printf("Changes committed to LEDs.\n");
+            fflush(stdout);
+
+        // Unknown input catching
+        } else {
+            printf("Unknown command. Try: see / set / commit\n");
+            fflush(stdout);
+        }
+    }
+    return 0;
+}
+
+
+// Lab 3
 
 int lab3() {
-
-    //Initialise system
-
-    stdio_init_all();
-
-    i2c_init(i2c0, 400000); //400kHz speed    
-    gpio_set_function(SDA_PIN, GPIO_FUNC_I2C);  // SDA_PIN of 16
-    gpio_set_function(SCL_PIN, GPIO_FUNC_I2C);  // SCL_PIN of 17
-    gpio_pull_up(SDA_PIN);   // add this
-    gpio_pull_up(SCL_PIN);   // add this
-
-    uint8_t WHO_AM_I = 0x0F;
-    uint8_t answer = 0;
-    i2c_write_blocking(i2c0, ACCEL_ADDR, &WHO_AM_I, 1, true);
-    i2c_read_blocking(i2c0, ACCEL_ADDR, &answer, 1, false);
-
-    // Wake up the accelerometer - 10Hz, normal mode, all axes enabled
-    uint8_t ctrl1[2] = {0x20, 0x27};  // CTRL_REG1, value 0x27
-    i2c_write_blocking(i2c0, ACCEL_ADDR, ctrl1, 2, false);
-
-    // Set ±2g range, high-res mode, block data update on
-    uint8_t ctrl4[2] = {0x23, 0x88};  // CTRL_REG4, value 0x88
-    i2c_write_blocking(i2c0, ACCEL_ADDR, ctrl4, 2, false);
+    // Initialise the accelerometer — abort if it fails
+    if (!lis3dh_init()) {
+        printf("Accelerometer init failed\n");
+        return -1;
+    }
 
     for (;;) {
+        // Read raw acceleration values
+        int16_t raw_x, raw_y, raw_z;
+        lis3dh_read_raw(&raw_x, &raw_y, &raw_z);
+        printf("raw_x: %d, raw_y: %d, raw_z: %d\n", raw_x, raw_y, raw_z);
+        fflush(stdout);
 
+        // Normalise X and Y to a -1.0 to 1.0 range
+        float tilt_x = raw_x / 1000.0f;
+        float tilt_y = raw_y / 1000.0f;
 
-    if (answer != 0x33) {
-            printf("Accelerometer not on correct address and is connected to 0x%02X\n", answer);
+        // Clamp to -1.0 / 1.0 so we don't exceed full brightness
+        if (tilt_x >  1.0f) tilt_x =  1.0f;
+        if (tilt_x < -1.0f) tilt_x = -1.0f;
+        if (tilt_y >  1.0f) tilt_y =  1.0f;
+        if (tilt_y < -1.0f) tilt_y = -1.0f;
+
+        for (int i = 0; i < NUM_LEDS; i++) {
+
+            // Work out where this LED sits around the ring as an angle (0–360)
+            // LED 0 starts at the top and they go clockwise
+            float led_angle = (360.0f / NUM_LEDS) * i;
+            float led_angle_rad = led_angle * (3.14159f / 180.0f);
+
+            // Project the tilt vector onto this LED's position around the ring.
+            // dot product gives +1 when the LED is in the direction of tilt,
+            // -1 when it's on the opposite side, 0 when perpendicular.
+            float led_x = sinf(led_angle_rad);
+            float led_y = cosf(led_angle_rad);
+            float dot = led_x * tilt_x + led_y * tilt_y;
+
+            // Apply a square root curve to the magnitude so nearby LEDs snap
+            // more aggressively to full brightness rather than falling off gradually.
+            // Lower the exponent (e.g. 0.3f) to make even more LEDs hit full brightness,
+            // raise it toward 1.0f to restore the original gradual falloff.
+            float magnitude = powf(fabsf(dot), 0.5f);
+
+            uint8_t r = 0, g = 0, b = 0;
+
+            if (dot > 0.0f) {
+                // High/lifted side — green
+                g = (uint8_t)(magnitude * 255.0f);
+            } else {
+                // Low side — red
+                r = (uint8_t)(magnitude * 255.0f);
+
+            }
+
+            // Blue fills in the gap — brightest when perpendicular to the tilt direction
+            b = (uint8_t)((1.0f - magnitude) * 255.0f);
+            b = ceil(b * 0.5); //reduce colour intensity / brightness
+            r = ceil(r * 0.5);
+            g = ceil(g * 0.5); 
+
+            // Stage the colour for this LED
+            leds_set(i, r, g, b);
         }
 
-    if (answer == 0x33) {
-        printf("Accelerometer connected to 0x%02X\n", answer);
-    }
-
-    uint8_t buf[6];
-    uint8_t reg = 0x28 | 0x80;  // OUT_X_L address, with auto-increment bit set
-
-    // Step 1: tell the chip which register to start reading from
-    i2c_write_blocking(i2c0, ACCEL_ADDR, &reg, 1, true);
-
-    // Step 2: read 6 bytes back (X_L, X_H, Y_L, Y_H, Z_L, Z_H)
-    i2c_read_blocking(i2c0, ACCEL_ADDR, buf, 6, false);
-
-    // Step 3: NOW you combine them
-    int16_t raw_x = (int16_t)((buf[1] << 8) | buf[0]) >> 4;
-    int16_t raw_y = (int16_t)((buf[3] << 8) | buf[2]) >> 4;
-    int16_t raw_z = (int16_t)((buf[5] << 8) | buf[4]) >> 4;
-    
-    printf("raw_x: %d, raw_y: %d, raw_z: %d\n", raw_x, raw_y, raw_z);
-
-
-    for (int i = 0; i < 12; i++) {
-    uint32_t colour;
-
-    if (i >= 0 && i <= 3) {
-        // left column - inverted x
-        if (raw_x < -100)      colour = (255u << 16) << 8;  // red
-        else if (raw_x > 100)  colour = (255u << 24);        // green
-        else                   colour = (255u << 8);          // blue
-
-    } else if (i >= 4 && i <= 7) {
-        // top row - driven by y
-        if (raw_y > 100)       colour = (255u << 16) << 8;  // red
-        else if (raw_y < -100) colour = (255u << 24);        // green
-        else                   colour = (255u << 8);          // blue
-
-    } else {
-        // right column (8-11) - x
-        if (raw_x > 100)       colour = (255u << 16) << 8;  // red
-        else if (raw_x < -100) colour = (255u << 24);        // green
-        else                   colour = (255u << 8);          // blue
-    }
-
-    pio_sm_put_blocking(pio0, 0, colour);
-}
-sleep_ms(100);
-
+        // Commit all staged colours to the hardware
+        leds_show();
+        sleep_ms(50);
     }
 
     return 0;
-
 }
 
+// Lab 4
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-int lab4_mic_initialise()
-{
-    int sample_rate = 44100; // 44.1 kHz standard audio sample rate
-    int fft_length = 1024; // Number of samples for FFT
-
-    int clkdiv = clock_get_hz(clk_sys) / (baud_rate_in_z * 8); // 8 cycles per bit for WS2812
-
-    int T = 1 + clkdiv; // Periods of the ADC clock
-
-    int adc_clk = 48 * 1000000; // 48 MHz system clock, convert to MHz for ADC
-    int T2 = (1 + clkdiv) / adc_clk;
-
-    //try to get T = 1 / (44.1Khz)
+int lab4_mic_initialise() {
     adc_init();
     adc_run(true);
     adc_run(false);
-
     adc_fifo_get_blocking();
+    adc_fifo_drain();
+
+    adc_gpio_init(25);
+    adc_select_input(0);
+
+    adc_fifo_setup(
+        true,   // enable FIFO
+        false,  // no DMA request
+        1,      // DREQ threshold
+        false,  // no error bit
+        false   // keep full 12-bit values
+    );
+
+    float clkdiv = (48000000.0f / 44100.0f) - 1.0f;
+    adc_set_clkdiv(clkdiv);
+
+    return 0;
+}
+
+int lab4_mic_read() {
+    int num_samples = 1024;
+    uint16_t buffer[1024];
 
     adc_fifo_drain();
-}
-
-int lab4_mic_read()
-{
-    int num_samples = 1024; // Number of samples to read for FFT
-    uint16_t buffer[1024]; // Buffer to hold ADC samples
-
-    adc_fifo_drain(); // Clear any old data from the FIFO
-    adc_run(true); // Start the ADC
+    adc_run(true);
 
     for (int i = 0; i < num_samples; i++) {
-        buffer[i] = adc_fifo_get_blocking(); // Read a sample from the ADC FIFO
+        buffer[i] = adc_fifo_get_blocking();
     }
 
-    adc_run(false); // Stop the ADC
-    adc_fifo_drain(); // Clear the FIFO again
-
-    // At this point, 'buffer' contains 'num_samples' raw ADC readings that can be processed with an FFT
+    adc_run(false);
+    adc_fifo_drain();
 
     return 0;
 }
 
+// Main
 
+int main() {
+ stdio_init_all();
+    sleep_ms(2000);  // wait for USB serial to connect
 
+    arm_status cmsis_test = ARM_MATH_SUCCESS;
+    printf("CMSIS-DSP smoke test: %d\n", cmsis_test);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-int main()
-{
-    stdio_init_all();
-
-    // Initialise PIO0 to control the LED chain
     uint pio_program_offset = pio_add_program(pio0, &ws2812_program);
     ws2812_program_init(pio0, 0, pio_program_offset, LED_PIN, 800000, false);
-    uint32_t led_data [1];
 
-    /*
-    for (;;) {
-        // Test the log system
-        log(LogLevel::INFORMATION, "Hello world");
+    leds_init(pio0, 0);
 
-        // Turn on the first LED to be a certain colour
-        uint8_t red = 0;
-        uint8_t green = 0;
-        uint8_t blue = 255;
-        led_data[0] = (red << 24) | (green << 16) | (blue << 8);
-        pio_sm_put_blocking(pio0, 0, led_data[0]);
-        sleep_ms(500);
+    lab4_mic_initialise();
+    lab4_mic_read();
 
-        // Set the first LED off 
-        led_data[0] = 0;
-        pio_sm_put_blocking(pio0, 0, led_data[0]);
-        sleep_ms(500);
-    }
-        */
-
-    lab3();
-
+    //lab2();
     return 0;
-
 }
