@@ -4,7 +4,7 @@
         {
             "name": "Pico Debug (CMSIS-DAP)",
             "cwd": "${workspaceFolder}",
-            "executable": "${workspaceFolder}/build/labs.elf",
+            "executable": "${workspaceFolder}/build/breakbeam_sensor.elf",
             "request": "launch",
             "type": "cortex-debug",
             "servertype": "openocd",
@@ -28,7 +28,7 @@
             "name": "(Windows) Launch Local Test Harness",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/labs.exe",
+            "program": "${workspaceFolder}/build/breakbeam_sensor.exe",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
