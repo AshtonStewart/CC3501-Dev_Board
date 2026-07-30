@@ -1,14 +1,11 @@
 #include "pico/stdlib.h"
 #include <stdio.h>
-#include "hardware/adc.h"
+#include "hardware/gpio.h"
 
-#define THRESHOLD 300 //Rough temporary thresh hold for when a car has passed based off light change
-#define ambience_high 3605 //gained from monitoring ADC light reading in regular room
-#define ambience_low 3600
 #define BUZZERPIN 18
-#define LIGHTADCPIN 27
+#define BREAKBEAMPIN 6 //digital break-beam sensor input, replaces the ADC light sensor
 #define lightpin 14 //should be same as regular board
-#define MAX_LAPS 5
+#define MAX_LAPS 100
 #define STARTUP_IGNORE_MS 1500 //ignore detections in this window after boot, assumed to be the car sitting at the start line
 
 void activate_buzzer(uint32_t timer_interval) {
@@ -19,12 +16,11 @@ void activate_buzzer(uint32_t timer_interval) {
                 //gpio_put(BUZZERPIN, false); //Turn off buzzer
                 sleep_ms(1);
             }
-                
 }
 
 void detect_car(){
-    adc_gpio_init(LIGHTADCPIN);
-    adc_select_input(1);
+    gpio_init(BREAKBEAMPIN);
+    gpio_set_dir(BREAKBEAMPIN, GPIO_IN);
     gpio_init(BUZZERPIN);
     uint32_t timer_interval = 100; // 100 ms interval for timer
     uint32_t time_between_readings = 0;
@@ -40,18 +36,12 @@ void detect_car(){
         lap_totals[i] = 0;
     }
 
-    while (lap_count < MAX_LAPS) {
-        int Light_Amount = 3605 - adc_read(); // Reverse the reading to get the amount of light detected rather than lack of
+    for (; lap_count < MAX_LAPS; ) {
+        bool car_detected = gpio_get(BREAKBEAMPIN); // true (HIGH) = beam broken / car present. Invert (!gpio_get(...)) if your wiring is active-low.
 
-        bool monitor_ADC = 0; //Check the ADC readings for debugging purposes
-        if (monitor_ADC) {
-            printf("ADC reading: %d\n", adc_read());
-            printf("light amount: %d\n", Light_Amount);
-        }
-        
-        //Decide if a car is in the way of the light based off quantity of recieved light.
-        
-        if (Light_Amount < THRESHOLD && elapsed_since_boot >= STARTUP_IGNORE_MS) {
+        //Decide if a car is in the way of the beam based on the digital reading.
+
+        if (car_detected && elapsed_since_boot >= STARTUP_IGNORE_MS) {
             //printf("Car detected!\n");
             activate_buzzer(timer_interval);
 
@@ -73,14 +63,13 @@ void detect_car(){
                     }
                 }
             }
-        } else if (Light_Amount >= THRESHOLD) {
+        } else if (!car_detected) {
             printf("No car.\n");
             sleep_ms(timer_interval);
             sleep_ms(timer_interval);
             is_same_lap = 0;
         }
         time_between_readings += timer_interval + timer_interval; //Increment the time between readings by the timer interval
-        total_race_time += 0; // total_race_time only advances when a lap completes (see above)
         elapsed_since_boot += timer_interval + timer_interval;
 
         gpio_set_dir(BUZZERPIN, GPIO_OUT);
@@ -92,7 +81,6 @@ void detect_car(){
 int main() {
     stdio_init_all();
     sleep_ms(2000); // give USB serial time to enumerate/reconnect before we start printing
-    adc_init();
     detect_car();
 }
 
