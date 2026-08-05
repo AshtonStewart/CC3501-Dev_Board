@@ -30,7 +30,7 @@ add_executable(breakbeam_sensor
 
 target_include_directories(breakbeam_sensor PUBLIC src/)
 
-pico_enable_stdio_usb(breakbeam_sensor 0)
+pico_enable_stdio_usb(breakbeam_sensor 1)
 pico_enable_stdio_uart(breakbeam_sensor 1)
 
 target_link_libraries(breakbeam_sensor
