@@ -1,5 +1,7 @@
 #include "pico/stdlib.h"
+#include "pico/time.h"
 #include <stdio.h>
+#include <string.h>
 #include "hardware/gpio.h"
 #include "hardware/pio.h"
 #include "WS2812.pio.h"
@@ -34,59 +36,66 @@ void activate_buzzer(uint32_t timer_interval) {
             }
 }
 
-// ----- LED feedback from the Pi (disabled) -----
-// The Pi sends "LED:GREEN\n" after a clean checkpoint pass, or "LED:RED\n"
-// if this checkpoint was reached after skipping the one before it.
-// Commented out: depends on drivers/WS2812/ws2812.h, which has been
-// superseded by the LEDDriver-based setup below. Port flash_led() onto
-// LEDDriver to bring this back.
-/*
-#include <string.h>
-#include "drivers/WS2812/ws2812.h"
+// ----- LED feedback from the Pi -----
+// The Pi's camera tracks each car across both checkpoints. After this
+// board's checkpoint is passed, the Pi sends "LED:GREEN\n" if neither
+// checkpoint was skipped, or "LED:RED\n" if this car skipped one - the
+// Pico has no way to know that itself, since it only sees the beam break.
+//
+// Reads are non-blocking (getchar_timeout_us(0)) and the flash itself
+// doesn't sleep - it sets a deadline that update_led_flash() checks once
+// per main loop iteration, so a command arriving never stalls beam
+// detection or lap timing.
 
 #define LED_FLASH_MS 300
 
 static char led_rx_buf[32];
 static int led_rx_len = 0;
+static absolute_time_t led_flash_deadline = nil_time;
 
-static void flash_led(uint8_t r, uint8_t g, uint8_t b) {
-    ws2812_set_color(r, g, b);
-    sleep_ms(LED_FLASH_MS);
-    ws2812_set_color(0, 0, 0); // off
-}
-
-static void handle_led_command(const char *cmd) {
-    if (strcmp(cmd, "LED:GREEN") == 0) {
-        flash_led(0, 255, 0);
-    } else if (strcmp(cmd, "LED:RED") == 0) {
-        flash_led(255, 0, 0);
-    }
-    // Unrecognised commands are ignored.
-}
-
-// Drains any bytes currently waiting on stdin (USB serial from the Pi)
-// without blocking. Call this once per main loop iteration.
-static void poll_led_command(void) {
-    int c;
-    while ((c = getchar_timeout_us(0)) != PICO_ERROR_TIMEOUT) {
-        if (c == '\n' || c == '\r') {
-            if (led_rx_len > 0) {
-                led_rx_buf[led_rx_len] = '\0';
-                handle_led_command(led_rx_buf);
-                led_rx_len = 0;
-            }
-        } else if (led_rx_len < (int)sizeof(led_rx_buf) - 1) {
-            led_rx_buf[led_rx_len++] = (char)c;
-        }
-    }
-}
-*/
-
-static void set_all_leds(LEDDriver &leds, RGB colour) {
+static void start_led_flash(LEDDriver &leds, RGB colour) {
     for (uint i = 0; i < NUM_LEDS; i++) {
         leds.set(i, colour);
     }
     leds.show();
+    led_flash_deadline = make_timeout_time_ms(LED_FLASH_MS);
+}
+
+// Call once per main loop iteration - turns the LEDs off once a flash's
+// time is up. No-op if nothing is currently flashing.
+static void update_led_flash(LEDDriver &leds) {
+    if (!is_nil_time(led_flash_deadline) && time_reached(led_flash_deadline)) {
+        leds.clear();
+        led_flash_deadline = nil_time;
+    }
+}
+
+static void handle_led_command(LEDDriver &leds, const char *cmd) {
+    if (strcmp(cmd, "LED:GREEN") == 0) {
+        start_led_flash(leds, RGB{0, LED_BRIGHTNESS, 0});
+    } else if (strcmp(cmd, "LED:RED") == 0) {
+        start_led_flash(leds, RGB{LED_BRIGHTNESS, 0, 0});
+    }
+    // Unrecognised commands (including our own printf/lap-time debug
+    // output, which shares this same USB serial link) are ignored.
+}
+
+
+static void poll_led_command(LEDDriver &leds) {
+    int c;
+    while ((c = getchar_timeout_us(0)) != PICO_ERROR_TIMEOUT) {
+        if (c == '\n' || c == '\r') {
+            led_rx_len = 0;
+        } else if (led_rx_len < (int)sizeof(led_rx_buf) - 1) {
+            led_rx_buf[led_rx_len++] = (char)c;
+            led_rx_buf[led_rx_len] = '\0';
+            if (strcmp(led_rx_buf, "LED:GREEN") == 0 || strcmp(led_rx_buf, "LED:RED") == 0) {
+                printf("[led] rx: \"%s\"\n", led_rx_buf); // TODO: remove once LED commands are confirmed working
+                handle_led_command(leds, led_rx_buf);
+                led_rx_len = 0;
+            }
+        }
+    }
 }
 
 void detect_car(LEDDriver &leds){
@@ -113,8 +122,6 @@ void detect_car(LEDDriver &leds){
 
     for (; lap_count < MAX_LAPS; ) {
         bool car_detected = gpio_get(BREAKBEAMPIN); // true (HIGH) = beam broken / car present. Invert (!gpio_get(...)) if your wiring is active-low.
-
-        set_all_leds(leds, car_detected ? RGB{0, LED_BRIGHTNESS, 0} : RGB{LED_BRIGHTNESS, 0, 0});
 
         //Decide if a car is in the way of the beam based on the digital reading.
 
@@ -154,7 +161,8 @@ void detect_car(LEDDriver &leds){
             read_temp_humidity();
         }
 
-        // poll_led_command(); // disabled along with the Pi-serial LED feedback above
+        poll_led_command(leds);
+        update_led_flash(leds);
 
         gpio_set_dir(BUZZERPIN, GPIO_OUT);
         gpio_put(BUZZERPIN, false); //Turn off buzzer
