@@ -5,15 +5,15 @@
 #define BUZZERPIN 18
 #define BREAKBEAMPIN 6 //digital break-beam sensor input, replaces the ADC light sensor
 #define lightpin 14 //should be same as regular board
-#define MAX_LAPS 100
+#define MAX_LAPS 10000
 #define STARTUP_IGNORE_MS 1500 //ignore detections in this window after boot, assumed to be the car sitting at the start line
 
 void activate_buzzer(uint32_t timer_interval) {
     for (int i = 0; i < timer_interval; i++) {
                 gpio_set_dir(BUZZERPIN, GPIO_OUT);
-                //gpio_put(BUZZERPIN, true); //Turn on buzzer
+                gpio_put(BUZZERPIN, true); //Turn on buzzer
                 sleep_ms(1);
-                //gpio_put(BUZZERPIN, false); //Turn off buzzer
+                gpio_put(BUZZERPIN, false); //Turn off buzzer
                 sleep_ms(1);
             }
 }
@@ -22,7 +22,7 @@ void detect_car(){
     gpio_init(BREAKBEAMPIN);
     gpio_set_dir(BREAKBEAMPIN, GPIO_IN);
     gpio_init(BUZZERPIN);
-    uint32_t timer_interval = 100; // 100 ms interval for timer
+    uint32_t timer_interval = 25; // 25 ms interval for timer
     uint32_t time_between_readings = 0;
     uint32_t total_race_time = 0; // cumulative time since the race timer effectively started
     uint32_t elapsed_since_boot = 0; // used only for the startup ignore window
