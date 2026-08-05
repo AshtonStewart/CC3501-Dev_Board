@@ -3,7 +3,7 @@
 #include <string.h>
 #include "hardware/gpio.h"
 
-#include "ws2812.h"
+#include "drivers/WS2812/ws2812.h"
 
 #define BUZZERPIN 18
 #define BREAKBEAMPIN 6 //digital break-beam sensor input, replaces the ADC light sensor
