@@ -26,7 +26,10 @@ pico_sdk_init()
 add_executable(breakbeam_sensor
     src/main.cpp
     src/drivers/temp-hum/t-h.cpp
+    src/drivers/LED/leds.cpp
 )
+
+pico_generate_pio_header(breakbeam_sensor ${CMAKE_CURRENT_LIST_DIR}/src/drivers/WS2812/WS2812.pio)
 
 target_include_directories(breakbeam_sensor PUBLIC src/)
 
@@ -37,6 +40,7 @@ target_link_libraries(breakbeam_sensor
     pico_stdlib
     hardware_adc
     hardware_i2c
+    hardware_pio
 
 )
 
