@@ -25,6 +25,7 @@ pico_sdk_init()
 
 add_executable(breakbeam_sensor
     src/main.cpp
+    src/drivers/temp-hum/t-h.cpp
 )
 
 target_include_directories(breakbeam_sensor PUBLIC src/)
@@ -35,6 +36,7 @@ pico_enable_stdio_uart(breakbeam_sensor 1)
 target_link_libraries(breakbeam_sensor
     pico_stdlib
     hardware_adc
+    hardware_i2c
 
 )
 
