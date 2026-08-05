@@ -7,13 +7,13 @@
 
 #define BUZZERPIN 18
 #define BREAKBEAMPIN 6 //digital break-beam sensor input, replaces the ADC light sensor
-#define lightpin 14 //should be same as regular board
+#define lightpin 14 //WS2812D-F5-1261 checkpoint feedback LED data pin (per schematic)
 #define MAX_LAPS 100
 #define STARTUP_IGNORE_MS 1500 //ignore detections in this window after boot, assumed to be the car sitting at the start line
 
-// WS2812D-F5-1261 checkpoint feedback LED - change to whichever GPIO it's
-// actually wired to.
-#define WS2812_PIN 22
+// WS2812D-F5-1261 checkpoint feedback LED - wired to the same pin as
+// lightpin above, per the schematic.
+#define WS2812_PIN lightpin
 #define LED_FLASH_MS 300
 
 #include "drivers/temp-hum/t-h.h"
