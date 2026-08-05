@@ -8,6 +8,17 @@
 #define MAX_LAPS 100
 #define STARTUP_IGNORE_MS 1500 //ignore detections in this window after boot, assumed to be the car sitting at the start line
 
+#include "drivers/temp-hum/t-h.h"
+
+#define TEMP_CHECK_MS 30000   // read temperature/humidity every 30 s
+
+static void read_temp_humidity(void) {
+    float temperature, humidity;
+    if (sht40_read(&temperature, &humidity)) {
+        printf("Temperature: %.2f C | Humidity: %.2f %%RH\n", temperature, humidity);
+    }
+}
+
 void activate_buzzer(uint32_t timer_interval) {
     for (int i = 0; i < timer_interval; i++) {
                 gpio_set_dir(BUZZERPIN, GPIO_OUT);
@@ -30,6 +41,10 @@ void detect_car(){
     uint32_t lap_count = 0;
     uint32_t lap_times[MAX_LAPS];        // stores each lap's individual time in ms
     uint32_t lap_totals[MAX_LAPS];       // stores cumulative race time at each lap
+
+    uint32_t loop_period_ms   = timer_interval * 2;              // each pass sleeps twice
+    uint32_t loops_till_check = TEMP_CHECK_MS / loop_period_ms;  // 30000 / 200 = 150
+    uint32_t loops_since_check = 0;
 
     for (int i = 0; i < MAX_LAPS; i++) {
         lap_times[i] = 0;
@@ -72,6 +87,11 @@ void detect_car(){
         time_between_readings += timer_interval + timer_interval; //Increment the time between readings by the timer interval
         elapsed_since_boot += timer_interval + timer_interval;
 
+        if (++loops_since_check >= loops_till_check) {
+            loops_since_check = 0;
+            read_temp_humidity();
+        }
+
         gpio_set_dir(BUZZERPIN, GPIO_OUT);
         gpio_put(BUZZERPIN, false); //Turn off buzzer
     }
@@ -81,7 +101,9 @@ void detect_car(){
 int main() {
     stdio_init_all();
     sleep_ms(2000); // give USB serial time to enumerate/reconnect before we start printing
+    sht40_init();
     detect_car();
+    
 }
 
 /*
