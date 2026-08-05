@@ -1,11 +1,8 @@
 #include "pico/stdlib.h"
 #include <stdio.h>
-#include <string.h>
 #include "hardware/gpio.h"
 #include "hardware/pio.h"
 #include "WS2812.pio.h"
-
-#include "drivers/WS2812/ws2812.h"
 
 #define BUZZERPIN 18
 #define BREAKBEAMPIN 6 //digital break-beam sensor input, replaces the ADC light sensor
@@ -13,11 +10,7 @@
 #define MAX_LAPS 100
 #define STARTUP_IGNORE_MS 1500 //ignore detections in this window after boot, assumed to be the car sitting at the start line
 #define NUM_LEDS 3
-
-// WS2812D-F5-1261 checkpoint feedback LED - wired to the same pin as
-// lightpin above, per the schematic.
-#define WS2812_PIN lightpin
-#define LED_FLASH_MS 300
+#define LED_BRIGHTNESS 40 //0-255, full brightness is uncomfortably bright at close range
 
 #include "drivers/temp-hum/t-h.h"
 #include "drivers/LED/leds.h"
@@ -41,11 +34,17 @@ void activate_buzzer(uint32_t timer_interval) {
             }
 }
 
-// ----- LED feedback from the Pi -----
-// The Pi sends "LED:GREEN\n" after a clean checkpoint pass, or
-// "LED:RED\n" if this checkpoint was reached after skipping the one
-// before it. Reads are non-blocking so this can be polled once per main
-// loop iteration without holding up beam detection.
+// ----- LED feedback from the Pi (disabled) -----
+// The Pi sends "LED:GREEN\n" after a clean checkpoint pass, or "LED:RED\n"
+// if this checkpoint was reached after skipping the one before it.
+// Commented out: depends on drivers/WS2812/ws2812.h, which has been
+// superseded by the LEDDriver-based setup below. Port flash_led() onto
+// LEDDriver to bring this back.
+/*
+#include <string.h>
+#include "drivers/WS2812/ws2812.h"
+
+#define LED_FLASH_MS 300
 
 static char led_rx_buf[32];
 static int led_rx_len = 0;
@@ -81,8 +80,16 @@ static void poll_led_command(void) {
         }
     }
 }
+*/
 
-void detect_car(){
+static void set_all_leds(LEDDriver &leds, RGB colour) {
+    for (uint i = 0; i < NUM_LEDS; i++) {
+        leds.set(i, colour);
+    }
+    leds.show();
+}
+
+void detect_car(LEDDriver &leds){
     gpio_init(BREAKBEAMPIN);
     gpio_set_dir(BREAKBEAMPIN, GPIO_IN);
     gpio_init(BUZZERPIN);
@@ -106,6 +113,8 @@ void detect_car(){
 
     for (; lap_count < MAX_LAPS; ) {
         bool car_detected = gpio_get(BREAKBEAMPIN); // true (HIGH) = beam broken / car present. Invert (!gpio_get(...)) if your wiring is active-low.
+
+        set_all_leds(leds, car_detected ? RGB{0, LED_BRIGHTNESS, 0} : RGB{LED_BRIGHTNESS, 0, 0});
 
         //Decide if a car is in the way of the beam based on the digital reading.
 
@@ -145,11 +154,7 @@ void detect_car(){
             read_temp_humidity();
         }
 
-        // Check for an LED command from the Pi every loop iteration. This
-        // is a non-blocking poll, so it doesn't add latency to beam
-        // detection - the flash itself (flash_led) does briefly block, but
-        // only happens after a checkpoint event, not on every loop.
-        poll_led_command();
+        // poll_led_command(); // disabled along with the Pi-serial LED feedback above
 
         gpio_set_dir(BUZZERPIN, GPIO_OUT);
         gpio_put(BUZZERPIN, false); //Turn off buzzer
@@ -161,16 +166,6 @@ int main() {
     stdio_init_all();
     sleep_ms(2000); // give USB serial time to enumerate/reconnect before we start printing
     sht40_init();
-<<<<<<< Updated upstream
-    ws2812_init(WS2812_PIN);
-    detect_car();
-}
-
-/*
-Could add: 
-Light code? - Need pin numbers
-*/
-=======
 
     PIO led_pio = pio0;
     uint led_sm = pio_claim_unused_sm(led_pio, true);
@@ -179,6 +174,5 @@ Light code? - Need pin numbers
     LEDDriver leds(led_pio, led_sm, NUM_LEDS);
     leds.clear();
 
-    detect_car();
+    detect_car(leds);
 }
->>>>>>> Stashed changes
