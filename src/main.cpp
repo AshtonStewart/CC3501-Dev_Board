@@ -1,12 +1,20 @@
 #include "pico/stdlib.h"
 #include <stdio.h>
+#include <string.h>
 #include "hardware/gpio.h"
+
+#include "ws2812.h"
 
 #define BUZZERPIN 18
 #define BREAKBEAMPIN 6 //digital break-beam sensor input, replaces the ADC light sensor
 #define lightpin 14 //should be same as regular board
 #define MAX_LAPS 100
 #define STARTUP_IGNORE_MS 1500 //ignore detections in this window after boot, assumed to be the car sitting at the start line
+
+// WS2812D-F5-1261 checkpoint feedback LED - change to whichever GPIO it's
+// actually wired to.
+#define WS2812_PIN 22
+#define LED_FLASH_MS 300
 
 #include "drivers/temp-hum/t-h.h"
 
@@ -27,6 +35,47 @@ void activate_buzzer(uint32_t timer_interval) {
                 //gpio_put(BUZZERPIN, false); //Turn off buzzer
                 sleep_ms(1);
             }
+}
+
+// ----- LED feedback from the Pi -----
+// The Pi sends "LED:GREEN\n" after a clean checkpoint pass, or
+// "LED:RED\n" if this checkpoint was reached after skipping the one
+// before it. Reads are non-blocking so this can be polled once per main
+// loop iteration without holding up beam detection.
+
+static char led_rx_buf[32];
+static int led_rx_len = 0;
+
+static void flash_led(uint8_t r, uint8_t g, uint8_t b) {
+    ws2812_set_color(r, g, b);
+    sleep_ms(LED_FLASH_MS);
+    ws2812_set_color(0, 0, 0); // off
+}
+
+static void handle_led_command(const char *cmd) {
+    if (strcmp(cmd, "LED:GREEN") == 0) {
+        flash_led(0, 255, 0);
+    } else if (strcmp(cmd, "LED:RED") == 0) {
+        flash_led(255, 0, 0);
+    }
+    // Unrecognised commands are ignored.
+}
+
+// Drains any bytes currently waiting on stdin (USB serial from the Pi)
+// without blocking. Call this once per main loop iteration.
+static void poll_led_command(void) {
+    int c;
+    while ((c = getchar_timeout_us(0)) != PICO_ERROR_TIMEOUT) {
+        if (c == '\n' || c == '\r') {
+            if (led_rx_len > 0) {
+                led_rx_buf[led_rx_len] = '\0';
+                handle_led_command(led_rx_buf);
+                led_rx_len = 0;
+            }
+        } else if (led_rx_len < (int)sizeof(led_rx_buf) - 1) {
+            led_rx_buf[led_rx_len++] = (char)c;
+        }
+    }
 }
 
 void detect_car(){
@@ -92,6 +141,12 @@ void detect_car(){
             read_temp_humidity();
         }
 
+        // Check for an LED command from the Pi every loop iteration. This
+        // is a non-blocking poll, so it doesn't add latency to beam
+        // detection - the flash itself (flash_led) does briefly block, but
+        // only happens after a checkpoint event, not on every loop.
+        poll_led_command();
+
         gpio_set_dir(BUZZERPIN, GPIO_OUT);
         gpio_put(BUZZERPIN, false); //Turn off buzzer
     }
@@ -102,8 +157,8 @@ int main() {
     stdio_init_all();
     sleep_ms(2000); // give USB serial time to enumerate/reconnect before we start printing
     sht40_init();
+    ws2812_init(WS2812_PIN);
     detect_car();
-    
 }
 
 /*
