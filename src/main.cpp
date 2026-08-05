@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "hardware/gpio.h"
+#include "hardware/pio.h"
+#include "WS2812.pio.h"
 
 #include "drivers/WS2812/ws2812.h"
 
@@ -10,6 +12,7 @@
 #define lightpin 14 //WS2812D-F5-1261 checkpoint feedback LED data pin (per schematic)
 #define MAX_LAPS 100
 #define STARTUP_IGNORE_MS 1500 //ignore detections in this window after boot, assumed to be the car sitting at the start line
+#define NUM_LEDS 3
 
 // WS2812D-F5-1261 checkpoint feedback LED - wired to the same pin as
 // lightpin above, per the schematic.
@@ -17,6 +20,7 @@
 #define LED_FLASH_MS 300
 
 #include "drivers/temp-hum/t-h.h"
+#include "drivers/LED/leds.h"
 
 #define TEMP_CHECK_MS 30000   // read temperature/humidity every 30 s
 
@@ -157,6 +161,7 @@ int main() {
     stdio_init_all();
     sleep_ms(2000); // give USB serial time to enumerate/reconnect before we start printing
     sht40_init();
+<<<<<<< Updated upstream
     ws2812_init(WS2812_PIN);
     detect_car();
 }
@@ -165,3 +170,15 @@ int main() {
 Could add: 
 Light code? - Need pin numbers
 */
+=======
+
+    PIO led_pio = pio0;
+    uint led_sm = pio_claim_unused_sm(led_pio, true);
+    uint led_offset = pio_add_program(led_pio, &ws2812_program);
+    ws2812_program_init(led_pio, led_sm, led_offset, lightpin, 800000.0f, false);
+    LEDDriver leds(led_pio, led_sm, NUM_LEDS);
+    leds.clear();
+
+    detect_car();
+}
+>>>>>>> Stashed changes
