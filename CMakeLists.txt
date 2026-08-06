@@ -27,6 +27,7 @@ add_executable(breakbeam_sensor
     src/main.cpp
     src/drivers/temp-hum/t-h.cpp
     src/drivers/LED/leds.cpp
+    src/drivers/buzzer/buzzer.cpp
 )
 
 pico_generate_pio_header(breakbeam_sensor ${CMAKE_CURRENT_LIST_DIR}/src/drivers/WS2812/WS2812.pio)
