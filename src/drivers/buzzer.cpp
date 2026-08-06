@@ -1,4 +1,4 @@
-#include "drivers/buzzer/buzzzer.h"
+#include "drivers/buzzer/buzzer.h"
 #include <stdio.h>
 #define BUZZERPIN 18
 #include "hardware/gpio.h"
