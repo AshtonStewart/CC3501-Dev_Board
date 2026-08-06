@@ -16,6 +16,7 @@
 
 #include "drivers/temp-hum/t-h.h"
 #include "drivers/LED/leds.h"
+#include "drivers/buzzer/buzzer.h"
 
 #define TEMP_CHECK_MS 30000   // read temperature/humidity every 30 s
 
