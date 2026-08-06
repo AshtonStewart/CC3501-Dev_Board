@@ -36,17 +36,6 @@ void activate_buzzer(uint32_t timer_interval) {
             }
 }
 
-// ----- LED feedback from the Pi -----
-// The Pi's camera tracks each car across both checkpoints. After this
-// board's checkpoint is passed, the Pi sends "LED:GREEN\n" if neither
-// checkpoint was skipped, or "LED:RED\n" if this car skipped one - the
-// Pico has no way to know that itself, since it only sees the beam break.
-//
-// Reads are non-blocking (getchar_timeout_us(0)) and the flash itself
-// doesn't sleep - it sets a deadline that update_led_flash() checks once
-// per main loop iteration, so a command arriving never stalls beam
-// detection or lap timing.
-
 #define LED_FLASH_MS 300
 
 static char led_rx_buf[32];
