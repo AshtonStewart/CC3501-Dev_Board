@@ -27,16 +27,6 @@ static void read_temp_humidity(void) {
     }
 }
 
-void activate_buzzer(uint32_t timer_interval) {
-    for (int i = 0; i < timer_interval; i++) {
-                gpio_set_dir(BUZZERPIN, GPIO_OUT);
-                //gpio_put(BUZZERPIN, true); //Turn on buzzer
-                sleep_ms(1);
-                //gpio_put(BUZZERPIN, false); //Turn off buzzer
-                sleep_ms(1);
-            }
-}
-
 #define LED_FLASH_MS 300
 
 static char led_rx_buf[32];
@@ -63,8 +53,10 @@ static void update_led_flash(LEDDriver &leds) {
 static void handle_led_command(LEDDriver &leds, const char *cmd) {
     if (strcmp(cmd, "LED:GREEN") == 0) {
         start_led_flash(leds, RGB{0, LED_BRIGHTNESS, 0});
+        activate_green_buzzer(100); // Activate green buzzer for 100 ms
     } else if (strcmp(cmd, "LED:RED") == 0) {
         start_led_flash(leds, RGB{LED_BRIGHTNESS, 0, 0});
+        activate_red_buzzer(100); // Activate red buzzer for 100 ms
     }
     // Unrecognised commands (including our own printf/lap-time debug
     // output, which shares this same USB serial link) are ignored.
@@ -101,9 +93,7 @@ void detect_car(LEDDriver &leds){
     uint32_t lap_times[MAX_LAPS];        // stores each lap's individual time in ms
     uint32_t lap_totals[MAX_LAPS];       // stores cumulative race time at each lap
 
-    uint32_t loop_period_ms   = timer_interval * 2;              // each pass sleeps twice
-    uint32_t loops_till_check = TEMP_CHECK_MS / loop_period_ms;  // 30000 / 200 = 150
-    uint32_t loops_since_check = 0;
+    absolute_time_t next_temp_check = make_timeout_time_ms(TEMP_CHECK_MS);
 
     for (int i = 0; i < MAX_LAPS; i++) {
         lap_times[i] = 0;
@@ -117,8 +107,6 @@ void detect_car(LEDDriver &leds){
 
         if (car_detected && elapsed_since_boot >= STARTUP_IGNORE_MS) {
             //printf("Car detected!\n");
-            activate_buzzer(timer_interval);
-
             //Detects if it's a new lap by seeing if the sensor has not been blocked since last blocking
             if (is_same_lap == 0) {
                 total_race_time += time_between_readings;
@@ -146,9 +134,9 @@ void detect_car(LEDDriver &leds){
         time_between_readings += timer_interval + timer_interval; //Increment the time between readings by the timer interval
         elapsed_since_boot += timer_interval + timer_interval;
 
-        if (++loops_since_check >= loops_till_check) {
-            loops_since_check = 0;
+        if (time_reached(next_temp_check)) {
             read_temp_humidity();
+            next_temp_check = make_timeout_time_ms(TEMP_CHECK_MS);
         }
 
         poll_led_command(leds);

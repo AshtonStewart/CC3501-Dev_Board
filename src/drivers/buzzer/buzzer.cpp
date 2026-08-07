@@ -3,6 +3,7 @@
 #define BUZZERPIN 18
 #include "hardware/gpio.h"
 #include "pico/stdlib.h"
+#include <cstdint>
 
 
 //Activate buzzer to play tone A for positive result / green light.
